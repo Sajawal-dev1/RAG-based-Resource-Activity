@@ -17,7 +17,6 @@ def embed_text(text: str):
     )
     return response.data[0].embedding
 def parse_date_range_from_question(question: str):
-    """Parse common time phrases into a (start, end) datetime tuple."""
     question = question.lower()
     today = datetime.utcnow()
 
@@ -56,7 +55,6 @@ def parse_date_range_from_question(question: str):
             end = start + timedelta(days=1)
             return start, end
 
-    # "from July 1 to July 6"
     match = re.search(r"from (.+?) to (.+)", question)
     if match:
         start = dateparser.parse(match.group(1))
@@ -110,13 +108,16 @@ def search_and_ask_gpt(question: str, top_k=15):
         print("❌ No relevant tasks found.")
         return
 
-    # Step 3: Prepare context
-    context = "\n\n".join([
-        m.metadata.get("context", "")[:1000] for m in matches
-    ])
+    context_blocks = []
+    for m in matches:
+        name = m.metadata.get("name", "Unnamed Task")
+        ctx = m.metadata.get("context", "")[:1000]
+        context_blocks.append(f"TASK: {name}\n{ctx}")
+
+    context = "\n\n".join(context_blocks)
 
     prompt = f"""
-You are a helpful assistant. Based on the following task summaries, answer the user's question.
+You are a helpful assistant. Based on the following task summaries, answer the user's question in a clear and structured format with bullet points or numbered lists where appropriate.
 
 User Question:
 {question}
