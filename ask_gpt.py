@@ -2,6 +2,7 @@ import openai
 import os
 from dotenv import load_dotenv
 from app.pinecone_service import index
+from app.clickup_service import get_team_members
 from datetime import datetime, timedelta
 import re
 import dateparser
@@ -10,29 +11,31 @@ from dateutil.parser import parse as parse_date
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+# Cache team members to avoid hitting the API repeatedly
+TEAM_MEMBERS = get_team_members()
+TEAM_NAMES = [member["name"].lower() for member in TEAM_MEMBERS if member.get("name")]
+
 def embed_text(text: str):
     response = openai.embeddings.create(
         input=text,
         model="text-embedding-3-small"
     )
     return response.data[0].embedding
+
 def parse_date_range_from_question(question: str):
     question = question.lower()
     today = datetime.utcnow()
 
-    # "this week"
     if "this week" in question:
         start = today - timedelta(days=today.weekday())
         end = start + timedelta(days=4)
         return start, end
 
-    # "last week"
     if "last week" in question:
         start = today - timedelta(days=today.weekday() + 7)
         end = start + timedelta(days=4)
         return start, end
 
-    # "last X days"
     match = re.search(r"last (\d+) days", question)
     if match:
         days = int(match.group(1))
@@ -40,13 +43,11 @@ def parse_date_range_from_question(question: str):
         start = today - timedelta(days=days)
         return start, end
 
-    # "past weekend"
     if "past weekend" in question:
         last_sunday = today - timedelta(days=today.weekday() + 1)
         last_saturday = last_sunday - timedelta(days=1)
         return last_saturday, last_sunday
 
-    # "on <date>" or "in <month>"
     match = re.search(r"(on|in) (.+)", question)
     if match:
         parsed = dateparser.parse(match.group(2))
@@ -64,13 +65,11 @@ def parse_date_range_from_question(question: str):
 
     return None, None
 
-
-
 def extract_assignee_from_question(question: str):
-    # Very basic name detection — you can enhance this later
-    keywords = ["javed", "sajawal", "ahmad", "dom"]  # Add team member names here
-    found = [name for name in keywords if name.lower() in question.lower()]
-    return found[0] if found else None
+    for name in TEAM_NAMES:
+        if name in question.lower():
+            return name
+    return None
 
 def search_and_ask_gpt(question: str, top_k=15):
     print(f"\n🔍 Searching for: {question}\n")
@@ -83,7 +82,6 @@ def search_and_ask_gpt(question: str, top_k=15):
     )
     matches = results.matches or []
 
-    # Step 1: Date Filter
     start_date, end_date = parse_date_range_from_question(question)
     if start_date and end_date:
         print(f"📅 Date filter: {start_date.date()} → {end_date.date()}")
@@ -94,7 +92,6 @@ def search_and_ask_gpt(question: str, top_k=15):
         ]
         print(f"✅ Matches after date filter: {len(matches)}")
 
-    # Step 2: Assignee Filter
     assignee = extract_assignee_from_question(question)
     if assignee:
         print(f"👤 Filtering by assignee: {assignee.title()}")
